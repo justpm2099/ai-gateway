@@ -1,0 +1,9 @@
+name = "ai-gateway-admin"
+compatibility_date = "2024-08-01"
+pages_build_output_dir = "out"
+
+[env.production]
+name = "ai-gateway-admin"
+
+[[env.production.vars]]
+NEXT_PUBLIC_API_BASE_URL = "https://ai-gateway.aibook2099.workers.dev"

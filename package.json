@@ -1,0 +1,18 @@
+{
+  "name": "ai-gateway",
+  "version": "1.0.0",
+  "description": "AI资源聚合层 - 统一多个AI提供商的API网关",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "echo 'No build needed for simple deployment'",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "db:init": "wrangler d1 execute ai_gateway_db --file=./schema.sql",
+    "db:migrate": "wrangler d1 migrations apply ai_gateway_db"
+  },
+  "keywords": ["ai", "gateway", "api", "cloudflare", "workers"],
+  "author": "AI Gateway Team",
+  "license": "MIT",
+  "type": "module"
+}

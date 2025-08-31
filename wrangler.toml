@@ -1,0 +1,34 @@
+name = "ai-gateway"
+main = "src/index.ts"
+compatibility_date = "2024-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+
+
+[[kv_namespaces]]
+binding = "KV_USERS"
+id = "fc9651c39a71499f95d26df4655aa6fb"
+
+[[kv_namespaces]]
+binding = "KV_CONFIG"
+id = "2eb0ec0b36444346aa4c12e8ce9da966"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-gateway-db"
+database_id = "47ed1a59-4e81-427f-ad53-8387ced6029e"
+
+[ai]
+binding = "AI"
+
+[vars]
+DEFAULT_PROVIDER = "deepseek"
+ENABLE_LOGGING = "true"
+RATE_LIMIT_PER_MINUTE = "60"
+
+# 注意：敏感的API密钥应该通过 wrangler secret 命令设置
+# wrangler secret put OPENAI_API_KEY
+# wrangler secret put DEEPSEEK_API_KEY
+# wrangler secret put GEMINI_API_KEY
+# wrangler secret put OPENROUTER_API_KEY
+# wrangler secret put SILICONFLOW_API_KEY
