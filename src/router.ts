@@ -241,7 +241,7 @@ export class Router {
     return {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key'
     };
   }
@@ -355,7 +355,19 @@ export class Router {
 
     // 管理员认证检查
     const user = await this.auth.authenticate(request);
-    if (!user || user.id !== 'test-user-1') { // 简单的管理员检查
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'Authentication required' }), {
+        status: 401,
+        headers: this.getCORSHeaders()
+      });
+    }
+
+    // 检查是否是管理员用户（使用测试API key或者是管理员角色）
+    const apiKey = request.headers.get('x-api-key') || request.headers.get('authorization')?.replace('Bearer ', '');
+    const isTestAdmin = apiKey === 'aig_test_key_123' || user.id === 'test-user-1';
+    const isAdmin = user.role === 'admin' || isTestAdmin;
+
+    if (!isAdmin) {
       return new Response(JSON.stringify({ error: 'Admin access required' }), {
         status: 403,
         headers: this.getCORSHeaders()
@@ -1107,9 +1119,9 @@ export class Router {
 
       const user = JSON.parse(existingUserData);
 
-      // 防止删除管理员用户
-      if (user.role === 'admin') {
-        return new Response(JSON.stringify({ error: 'Cannot delete admin user' }), {
+      // 防止删除系统默认管理员用户
+      if (user.role === 'admin' && (user.email === 'admin@ai-gateway.local' || user.name === '系统管理员')) {
+        return new Response(JSON.stringify({ error: 'Cannot delete system admin user' }), {
           status: 403,
           headers: this.getCORSHeaders()
         });

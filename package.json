@@ -11,8 +11,17 @@
     "db:init": "wrangler d1 execute ai_gateway_db --file=./schema.sql",
     "db:migrate": "wrangler d1 migrations apply ai_gateway_db"
   },
-  "keywords": ["ai", "gateway", "api", "cloudflare", "workers"],
+  "keywords": [
+    "ai",
+    "gateway",
+    "api",
+    "cloudflare",
+    "workers"
+  ],
   "author": "AI Gateway Team",
   "license": "MIT",
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "wrangler": "^4.33.1"
+  }
 }

@@ -5,7 +5,11 @@ const nextConfig: NextConfig = {
   trailingSlash: true,
   images: {
     unoptimized: true
-  }
+  },
+  // 优化性能
+  compress: true,
+  poweredByHeader: false,
+  generateEtags: false,
 };
 
 export default nextConfig;

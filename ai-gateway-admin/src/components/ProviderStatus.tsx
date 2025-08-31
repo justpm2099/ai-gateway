@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Switch } from '@headlessui/react';
 import ProviderSelector from './ProviderSelector';
 import SimpleProviderConfig from './SimpleProviderConfig';
+import SmartProviderRecognition from './SmartProviderRecognition';
 import { ProviderPreset } from '../data/providerPresets';
 import {
   CheckCircleIcon,
@@ -20,7 +21,11 @@ import {
   ChartBarIcon,
   ExclamationTriangleIcon,
   EllipsisVerticalIcon,
-  CpuChipIcon
+  CpuChipIcon,
+  ArrowDownTrayIcon,
+  ArrowUpTrayIcon,
+  DocumentTextIcon,
+  SparklesIcon
 } from '@heroicons/react/24/outline';
 
 interface Provider {
@@ -128,6 +133,16 @@ const ProviderStatus = () => {
   const [filterStatus, setFilterStatus] = useState<'all' | 'healthy' | 'degraded' | 'down'>('all');
   const [showActionMenu, setShowActionMenu] = useState<string | null>(null);
   const [actionMenuPosition, setActionMenuPosition] = useState({ x: 0, y: 0 });
+
+  // 导入导出相关状态
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importData, setImportData] = useState<Provider[]>([]);
+  const [selectedImportProviders, setSelectedImportProviders] = useState<string[]>([]);
+
+  // 智能识别相关状态
+  const [showSmartRecognition, setShowSmartRecognition] = useState(false);
 
   // 新供应商表单状态
   const [newProvider, setNewProvider] = useState({
@@ -979,6 +994,137 @@ const ProviderStatus = () => {
     }
   };
 
+  // 导出功能
+  const exportProviders = () => {
+    const providersToExport = selectedProviders.length > 0
+      ? providers.filter(p => selectedProviders.includes(p.id))
+      : providers;
+
+    const exportData = {
+      version: '1.0',
+      exportTime: new Date().toISOString(),
+      providers: providersToExport.map(provider => ({
+        ...provider,
+        // 移除敏感信息，但保留结构
+        apiKey: provider.apiKeyConfigured ? '[CONFIGURED]' : '[NOT_CONFIGURED]'
+      }))
+    };
+
+    const dataStr = JSON.stringify(exportData, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ai-providers-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    setShowExportModal(false);
+    setSelectedProviders([]);
+  };
+
+  // 导入功能
+  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImportFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const importedData = JSON.parse(content);
+
+        if (importedData.providers && Array.isArray(importedData.providers)) {
+          setImportData(importedData.providers);
+          setSelectedImportProviders([]);
+        } else {
+          alert('导入文件格式不正确，请选择有效的配置文件');
+        }
+      } catch (error) {
+        alert('文件解析失败，请检查文件格式');
+        console.error('Import file parse error:', error);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const importSelectedProviders = async () => {
+    const providersToImport = selectedImportProviders.length > 0
+      ? importData.filter(p => selectedImportProviders.includes(p.id))
+      : importData;
+
+    for (const provider of providersToImport) {
+      try {
+        // 检查是否已存在同名供应商
+        const existingProvider = providers.find(p => p.id === provider.id);
+
+        const providerData = {
+          ...provider,
+          // 重置一些状态
+          status: 'down' as const,
+          enabled: false,
+          lastCheck: new Date().toISOString(),
+          latency: 0,
+          // 如果是已配置的API密钥，需要用户重新配置
+          apiKeyConfigured: false
+        };
+
+        const method = existingProvider ? 'PUT' : 'POST';
+        const url = existingProvider
+          ? `https://ai-gateway.aibook2099.workers.dev/admin/providers/${provider.id}`
+          : 'https://ai-gateway.aibook2099.workers.dev/admin/providers';
+
+        const response = await fetch(url, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': 'aig_test_key_123'
+          },
+          body: JSON.stringify(providerData)
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to import provider ${provider.name}`);
+        }
+      } catch (error) {
+        console.error(`Failed to import provider ${provider.name}:`, error);
+        alert(`导入供应商 ${provider.name} 失败`);
+      }
+    }
+
+    await fetchProviders();
+    setShowImportModal(false);
+    setImportFile(null);
+    setImportData([]);
+    setSelectedImportProviders([]);
+    alert(`成功导入 ${providersToImport.length} 个供应商配置`);
+  };
+
+  // 智能识别处理函数
+  const handleSmartRecognition = (recognizedProvider: any) => {
+    // 将识别结果转换为新供应商表单数据
+    setNewProvider({
+      name: recognizedProvider.name,
+      displayName: recognizedProvider.displayName,
+      baseUrl: recognizedProvider.baseUrl || '',
+      description: `通过智能识别添加的${recognizedProvider.displayName}供应商`,
+      models: recognizedProvider.models ? recognizedProvider.models.join(', ') : '',
+      costPerToken: 0,
+      priority: 1,
+      maxTokens: 4096,
+      rateLimit: { requests: 100, window: '1h' },
+      customHeaders: recognizedProvider.apiKey ? { 'Authorization': `Bearer ${recognizedProvider.apiKey}` } : {}
+    });
+
+    // 关闭智能识别模态框，打开添加供应商模态框
+    setShowSmartRecognition(false);
+    setShowAddProviderModal(true);
+  };
+
   // 处理操作菜单
   const handleActionMenuClick = (event: React.MouseEvent, providerId: string) => {
     event.preventDefault();
@@ -1036,14 +1182,24 @@ const ProviderStatus = () => {
               <h2 className="text-xl font-semibold text-gray-900">AI供应商管理</h2>
               <p className="text-sm text-gray-600 mt-1">管理和监控各个AI提供商的状态</p>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowProviderSelector(true)}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-            >
-              <PlusIcon className="w-4 h-4 mr-2" />
-              添加供应商
-            </button>
+            <div className="flex space-x-3">
+              <button
+                type="button"
+                onClick={() => setShowSmartRecognition(true)}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                <SparklesIcon className="w-4 h-4 mr-2" />
+                智能识别
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowProviderSelector(true)}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                <PlusIcon className="w-4 h-4 mr-2" />
+                添加供应商
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1080,33 +1236,63 @@ const ProviderStatus = () => {
               </div>
             </div>
 
-            {/* 批量操作 */}
-            {selectedProviders.length > 0 && (
+            {/* 批量操作和导入导出 */}
+            <div className="flex items-center space-x-4">
+              {/* 导入导出按钮 */}
               <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-600">已选择 {selectedProviders.length} 个</span>
                 <button
                   type="button"
-                  onClick={() => toggleSelectedProviders(true)}
-                  className="text-sm text-green-600 hover:text-green-800"
+                  onClick={() => setShowImportModal(true)}
+                  className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                 >
-                  启用
+                  <ArrowUpTrayIcon className="w-4 h-4 mr-1" />
+                  导入
                 </button>
                 <button
                   type="button"
-                  onClick={() => toggleSelectedProviders(false)}
-                  className="text-sm text-red-600 hover:text-red-800"
+                  onClick={() => setShowExportModal(true)}
+                  className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                 >
-                  禁用
-                </button>
-                <button
-                  type="button"
-                  onClick={testSelectedProviders}
-                  className="text-sm text-blue-600 hover:text-blue-800"
-                >
-                  测试
+                  <ArrowDownTrayIcon className="w-4 h-4 mr-1" />
+                  导出
                 </button>
               </div>
-            )}
+
+              {/* 批量操作 */}
+              {selectedProviders.length > 0 && (
+                <div className="flex items-center space-x-2 border-l border-gray-300 pl-4">
+                  <span className="text-sm text-gray-600">已选择 {selectedProviders.length} 个</span>
+                  <button
+                    type="button"
+                    onClick={() => toggleSelectedProviders(true)}
+                    className="text-sm text-green-600 hover:text-green-800"
+                  >
+                    启用
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleSelectedProviders(false)}
+                    className="text-sm text-red-600 hover:text-red-800"
+                  >
+                    禁用
+                  </button>
+                  <button
+                    type="button"
+                    onClick={testSelectedProviders}
+                    className="text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    测试
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowExportModal(true)}
+                    className="text-sm text-indigo-600 hover:text-indigo-800"
+                  >
+                    导出选中
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1123,6 +1309,9 @@ const ProviderStatus = () => {
                     className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
                     title="全选"
                   />
+                </th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                  序号
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" style={{minWidth: '200px'}}>
                   供应商
@@ -1154,7 +1343,7 @@ const ProviderStatus = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredAndSortedProviders.map((provider) => (
+              {filteredAndSortedProviders.map((provider, index) => (
                 <tr key={provider.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <input
@@ -1170,6 +1359,12 @@ const ProviderStatus = () => {
                       className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
                       title={`选择 ${provider.displayName || provider.name}`}
                     />
+                  </td>
+
+                  <td className="px-3 py-4 whitespace-nowrap text-center">
+                    <span className="inline-flex items-center justify-center w-6 h-6 text-xs font-medium text-gray-700 bg-gray-100 rounded-full">
+                      {index + 1}
+                    </span>
                   </td>
 
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -2052,6 +2247,224 @@ const ProviderStatus = () => {
             setShowSimpleConfig(false);
             setSelectedPreset(null);
           }}
+        />
+      )}
+
+      {/* 导出模态框 */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">导出供应商配置</h3>
+                <button
+                  onClick={() => setShowExportModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <XCircleIcon className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="mb-4">
+                <p className="text-sm text-gray-600 mb-2">
+                  {selectedProviders.length > 0
+                    ? `将导出 ${selectedProviders.length} 个选中的供应商配置`
+                    : `将导出全部 ${providers.length} 个供应商配置`
+                  }
+                </p>
+                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                  <div className="flex">
+                    <ExclamationTriangleIcon className="h-5 w-5 text-yellow-400" />
+                    <div className="ml-3">
+                      <p className="text-sm text-yellow-700">
+                        注意：导出的配置文件不包含实际的API密钥，仅包含配置结构。
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setShowExportModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={exportProviders}
+                  className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700"
+                >
+                  <ArrowDownTrayIcon className="w-4 h-4 mr-2 inline" />
+                  导出
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 导入模态框 */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-900">导入供应商配置</h3>
+                <button
+                  onClick={() => {
+                    setShowImportModal(false);
+                    setImportFile(null);
+                    setImportData([]);
+                    setSelectedImportProviders([]);
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <XCircleIcon className="w-6 h-6" />
+                </button>
+              </div>
+
+              {!importFile ? (
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6">
+                  <div className="text-center">
+                    <DocumentTextIcon className="mx-auto h-12 w-12 text-gray-400" />
+                    <div className="mt-4">
+                      <label htmlFor="import-file" className="cursor-pointer">
+                        <span className="mt-2 block text-sm font-medium text-gray-900">
+                          选择配置文件
+                        </span>
+                        <span className="mt-1 block text-sm text-gray-500">
+                          支持JSON格式的供应商配置文件
+                        </span>
+                      </label>
+                      <input
+                        id="import-file"
+                        type="file"
+                        accept=".json"
+                        onChange={handleImportFile}
+                        className="sr-only"
+                      />
+                    </div>
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById('import-file')?.click()}
+                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200"
+                      >
+                        选择文件
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
+                    <p className="text-sm text-green-700">
+                      已选择文件: {importFile.name} ({importData.length} 个供应商配置)
+                    </p>
+                  </div>
+
+                  {importData.length > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-md font-medium text-gray-900">选择要导入的供应商</h4>
+                        <div className="flex space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedImportProviders([])}
+                            className="text-sm text-gray-600 hover:text-gray-800"
+                          >
+                            清空选择
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedImportProviders(importData.map(p => p.id))}
+                            className="text-sm text-indigo-600 hover:text-indigo-800"
+                          >
+                            全选
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-md">
+                        {importData.map((provider) => (
+                          <div key={provider.id} className="flex items-center p-3 border-b border-gray-100 last:border-b-0">
+                            <input
+                              type="checkbox"
+                              checked={selectedImportProviders.includes(provider.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedImportProviders([...selectedImportProviders, provider.id]);
+                                } else {
+                                  setSelectedImportProviders(selectedImportProviders.filter(id => id !== provider.id));
+                                }
+                              }}
+                              className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                            />
+                            <div className="ml-3 flex-1">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-medium text-gray-900">
+                                    {provider.displayName || provider.name}
+                                  </p>
+                                  <p className="text-sm text-gray-500">
+                                    {provider.models?.length || 0} 个模型 • 优先级: {provider.priority}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                    providers.find(p => p.id === provider.id)
+                                      ? 'bg-yellow-100 text-yellow-800'
+                                      : 'bg-green-100 text-green-800'
+                                  }`}>
+                                    {providers.find(p => p.id === provider.id) ? '更新' : '新增'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="mt-4 flex justify-end space-x-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowImportModal(false);
+                            setImportFile(null);
+                            setImportData([]);
+                            setSelectedImportProviders([]);
+                          }}
+                          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          onClick={importSelectedProviders}
+                          disabled={selectedImportProviders.length === 0 && importData.length > 0}
+                          className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-transparent rounded-md hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        >
+                          <ArrowUpTrayIcon className="w-4 h-4 mr-2 inline" />
+                          导入 {selectedImportProviders.length > 0 ? `(${selectedImportProviders.length})` : '全部'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 智能识别模态框 */}
+      {showSmartRecognition && (
+        <SmartProviderRecognition
+          onProviderRecognized={handleSmartRecognition}
+          onClose={() => setShowSmartRecognition(false)}
         />
       )}
     </div>
